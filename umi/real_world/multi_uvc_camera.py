@@ -22,6 +22,7 @@ class MultiUvcCamera:
             get_max_k=30,
             receive_latency=0.0,
             cap_buffer_size=1,
+            use_mjpeg=False,
             transform: Optional[Union[Callable[[Dict], Dict], List[Callable]]]=None,
             vis_transform: Optional[Union[Callable[[Dict], Dict], List[Callable]]]=None,
             recording_transform: Optional[Union[Callable[[Dict], Dict], List[Callable]]]=None,
@@ -41,6 +42,8 @@ class MultiUvcCamera:
             capture_fps, n_cameras, (int, float))
         cap_buffer_size = repeat_to_list(
             cap_buffer_size, n_cameras, int)
+        use_mjpeg = repeat_to_list(
+            use_mjpeg, n_cameras, bool)
         transform = repeat_to_list(
             transform, n_cameras, Callable)
         vis_transform = repeat_to_list(
@@ -62,6 +65,7 @@ class MultiUvcCamera:
                 get_max_k=get_max_k,
                 receive_latency=receive_latency,
                 cap_buffer_size=cap_buffer_size[i],
+                use_mjpeg=use_mjpeg[i],
                 transform=transform[i],
                 vis_transform=vis_transform[i],
                 recording_transform=recording_transform[i],

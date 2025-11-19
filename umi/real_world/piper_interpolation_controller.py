@@ -310,9 +310,11 @@ class PiperInterpolationController(mp.Process):
                         )
                     elif cmd == Command.SCHEDULE_WAYPOINT.value:
                         target_pose = command['target_pose']
-                        target_time = float(command['target_time'])
-                        target_time = time.monotonic() - time.time() + target_time
+                        target_time_input = float(command['target_time'])
+                        target_time = time.monotonic() - time.time() + target_time_input
                         curr_time = t_now + dt
+                        if self.verbose:
+                            print(f"[Piper] Schedule: In={target_time_input:.3f}, Mono={target_time:.3f}, Curr={curr_time:.3f}, Diff={target_time-curr_time:.3f}")
                         pose_interp = pose_interp.schedule_waypoint(
                             pose=target_pose,
                             time=target_time,

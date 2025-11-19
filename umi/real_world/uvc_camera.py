@@ -44,6 +44,7 @@ class UvcCamera(mp.Process):
             vis_transform: Optional[Callable[[Dict], Dict]] = None,
             recording_transform: Optional[Callable[[Dict], Dict]] = None,
             video_recorder: Optional[VideoRecorder] = None,
+            use_mjpeg=False,
             verbose=False
         ):
         super().__init__()
@@ -118,6 +119,7 @@ class UvcCamera(mp.Process):
         self.vis_transform = vis_transform
         self.recording_transform = recording_transform
         self.video_recorder = video_recorder
+        self.use_mjpeg = use_mjpeg
         self.verbose = verbose
         self.put_start_time = None
         self.num_threads = num_threads
@@ -211,6 +213,12 @@ class UvcCamera(mp.Process):
             # set resolution and fps
             w, h = self.resolution
             fps = self.capture_fps
+            
+            # Set MJPEG codec for Pika cameras (reduces USB bandwidth, improves FPS)
+            if self.use_mjpeg:
+                fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+                cap.set(cv2.CAP_PROP_FOURCC, fourcc)
+            
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
             # set fps

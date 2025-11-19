@@ -8,6 +8,8 @@ from multiprocessing.managers import SharedMemoryManager
 from umi.real_world.rtde_interpolation_controller import RTDEInterpolationController
 from umi.real_world.wsg_controller import WSGController
 from umi.real_world.franka_interpolation_controller import FrankaInterpolationController
+from umi.real_world.piper_interpolation_controller import PiperInterpolationController
+from umi.real_world.pika_gripper_controller import PikaGripperController
 from umi.real_world.multi_uvc_camera import MultiUvcCamera, VideoRecorder
 from diffusion_policy.common.timestamp_accumulator import (
     TimestampActionAccumulator,
@@ -35,6 +37,7 @@ class BimanualUmiEnv:
             obs_image_resolution=(224,224),
             max_obs_buffer_size=60,
             obs_float32=False,
+            camera_paths=None,  # Optional: explicit camera paths (e.g., ['/dev/video81', '/dev/video82'])
             camera_reorder=None,
             no_mirror=False,
             fisheye_converter=None,
@@ -78,10 +81,15 @@ class BimanualUmiEnv:
 
         # Wait for all v4l cameras to be back online
         time.sleep(0.1)
-        v4l_paths = get_sorted_v4l_paths()
-        if camera_reorder is not None:
-            paths = [v4l_paths[i] for i in camera_reorder]
-            v4l_paths = paths
+        
+        # Use explicit camera paths if provided, otherwise auto-detect
+        if camera_paths is not None:
+            v4l_paths = camera_paths
+        else:
+            v4l_paths = get_sorted_v4l_paths()
+            if camera_reorder is not None:
+                paths = [v4l_paths[i] for i in camera_reorder]
+                v4l_paths = paths
 
         # compute resolution for vis
         rw, rh, col, row = optimal_row_cols(
@@ -185,6 +193,7 @@ class BimanualUmiEnv:
             get_max_k=max_obs_buffer_size,
             receive_latency=camera_obs_latency,
             cap_buffer_size=cap_buffer_size,
+            use_mjpeg=True,  # Enable MJPEG for Pika cameras (better FPS)
             transform=transform,
             vis_transform=vis_transform,
             video_recorder=video_recorder,
@@ -240,18 +249,40 @@ class BimanualUmiEnv:
                     verbose=False,
                     receive_latency=rc['robot_obs_latency']
                 )
+            elif rc['robot_type'].startswith('piper'):
+                this_robot = PiperInterpolationController(
+                    shm_manager=shm_manager,
+                    piper_can=rc['piper_can'],
+                    frequency=rc.get('frequency', 200),
+                    lookahead_time=0.1,
+                    gain_pos=0.25,
+                    gain_rot=0.16,
+                    launch_timeout=5,
+                    tool_offset=[0, 0, rc['tcp_offset']],
+                    receive_latency=rc['robot_obs_latency'],
+                    verbose=False
+                )
             else:
                 raise NotImplementedError()
             robots.append(this_robot)
 
         for gc in grippers_config:
-            this_gripper = WSGController(
-                shm_manager=shm_manager,
-                hostname=gc['gripper_ip'],
-                port=gc['gripper_port'],
-                receive_latency=gc['gripper_obs_latency'],
-                use_meters=True
-            )
+            if gc.get('gripper_type', '').startswith('pika') or 'gripper_serial' in gc:
+                this_gripper = PikaGripperController(
+                    shm_manager=shm_manager,
+                    serial_path=gc['gripper_serial'],
+                    frequency=30,
+                    receive_latency=gc['gripper_obs_latency'],
+                    use_meters=True
+                )
+            else:
+                this_gripper = WSGController(
+                    shm_manager=shm_manager,
+                    hostname=gc['gripper_ip'],
+                    port=gc['gripper_port'],
+                    receive_latency=gc['gripper_obs_latency'],
+                    use_meters=True
+                )
 
             grippers.append(this_gripper)
 

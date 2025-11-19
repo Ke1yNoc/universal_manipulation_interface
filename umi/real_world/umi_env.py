@@ -9,6 +9,8 @@ from multiprocessing.managers import SharedMemoryManager
 from umi.real_world.rtde_interpolation_controller import RTDEInterpolationController
 from umi.real_world.wsg_controller import WSGController
 from umi.real_world.franka_interpolation_controller import FrankaInterpolationController
+from umi.real_world.piper_interpolation_controller import PiperInterpolationController
+from umi.real_world.pika_gripper_controller import PikaGripperController
 from umi.real_world.multi_uvc_camera import MultiUvcCamera, VideoRecorder
 from diffusion_policy.common.timestamp_accumulator import (
     TimestampActionAccumulator,
@@ -248,7 +250,7 @@ class UmiEnv:
                 receive_keys=None,
                 receive_latency=robot_obs_latency
                 )
-        elif robot_type.startswith('franka'):
+            elif robot_type.startswith('franka'):
             robot = FrankaInterpolationController(
                 shm_manager=shm_manager,
                 robot_ip=robot_ip,
@@ -258,14 +260,36 @@ class UmiEnv:
                 verbose=False,
                 receive_latency=robot_obs_latency
             )
+        elif robot_type.startswith('piper'):
+            robot = PiperInterpolationController(
+                shm_manager=shm_manager,
+                piper_can=robot_ip,
+                frequency=200,
+                lookahead_time=0.1,
+                gain_pos=0.25,
+                gain_rot=0.16,
+                launch_timeout=5,
+                tool_offset=[0, 0, tcp_offset],
+                receive_latency=robot_obs_latency,
+                verbose=False
+            )
         
-        gripper = WSGController(
-            shm_manager=shm_manager,
-            hostname=gripper_ip,
-            port=gripper_port,
-            receive_latency=gripper_obs_latency,
-            use_meters=True
-        )
+        if gripper_ip.startswith('/dev') or gripper_ip.startswith('COM'):
+            gripper = PikaGripperController(
+                shm_manager=shm_manager,
+                serial_path=gripper_ip,
+                frequency=30,
+                receive_latency=gripper_obs_latency,
+                use_meters=True
+            )
+        else:
+            gripper = WSGController(
+                shm_manager=shm_manager,
+                hostname=gripper_ip,
+                port=gripper_port,
+                receive_latency=gripper_obs_latency,
+                use_meters=True
+            )
 
         self.camera = camera
         self.robot = robot

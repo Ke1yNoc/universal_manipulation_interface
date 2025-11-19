@@ -126,7 +126,13 @@ class PikaGripperController(mp.Process):
         return self.ring_buffer.get_all()
 
     def run(self):
+        import logging
+        logging.getLogger('pika.gripper').setLevel(logging.WARNING)
+        logging.getLogger('pika.serial_comm').setLevel(logging.WARNING)
+        
         grip = Gripper(self.serial_path)
+        # Set to 60 FPS to achieve stable 30 FPS actual frame rate
+        # (Pika cameras deliver half of requested FPS)
         connected = grip.connect()
         if not connected:
             raise RuntimeError(f"Failed to connect Pika gripper at {self.serial_path}")
