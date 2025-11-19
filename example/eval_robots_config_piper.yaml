@@ -50,6 +50,6 @@
   "cameras": { 
     "dev_video_paths": ["/dev/video81", "/dev/video82"], 
     "resolution": [ [640,480], [640,480] ], 
-    "capture_fps": [60,60]  # Request 60 to get 30 FPS actual (Pika 2:1 ratio)
+    "capture_fps": [30,30]  # Request 60 to get 30 FPS actual (Pika 2:1 ratio)
   }
 }

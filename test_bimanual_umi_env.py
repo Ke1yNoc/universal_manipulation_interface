@@ -20,45 +20,17 @@ def main(output, frequency, duration, test_move):
     Test BimanualUmiEnv with Piper robots
     """
     
-    # Piper robot configuration (from eval_robots_config_piper.yaml)
-    robots_config = [
-        {
-            'robot_type': 'piper',
-            'piper_can': 'can0',
-            'robot_obs_latency': 0.0001,
-            'robot_action_latency': 0.05,
-            'tcp_offset': 0.182,
-            'height_threshold': -0.010,
-            'sphere_radius': 0.1,
-            'sphere_center': [0, -0.06, -0.185],
-        },
-        {
-            'robot_type': 'piper',
-            'piper_can': 'can1',
-            'robot_obs_latency': 0.0001,
-            'robot_action_latency': 0.05,
-            'tcp_offset': 0.182,
-            'height_threshold': -0.010,
-            'sphere_radius': 0.1,
-            'sphere_center': [0, -0.06, -0.185],
-        }
-    ]
+    import yaml
+    import os
     
-    # Pika gripper configuration
-    grippers_config = [
-        {
-            'gripper_type': 'pika',
-            'gripper_serial': '/dev/ttyUSB81',
-            'gripper_obs_latency': 0.01,
-            'gripper_action_latency': 0.1,
-        },
-        {
-            'gripper_type': 'pika',
-            'gripper_serial': '/dev/ttyUSB82',
-            'gripper_obs_latency': 0.01,
-            'gripper_action_latency': 0.1,
-        }
-    ]
+    # Load robot config from yaml
+    config_path = os.path.join(os.path.dirname(__file__), 'example/eval_robots_config_piper.yaml')
+    with open(config_path, 'r') as f:
+        full_config = yaml.safe_load(f)
+    
+    robots_config = full_config['robots']
+    grippers_config = full_config['grippers']
+    camera_config = full_config.get('cameras', None)
     
     print("="*60)
     print("Testing BimanualUmiEnv with Piper Setup")
@@ -70,9 +42,6 @@ def main(output, frequency, duration, test_move):
     print("="*60)
     
     with SharedMemoryManager() as shm_manager:
-        # Explicitly specify camera paths (don't rely on auto-detection)
-        camera_paths = ['/dev/video81', '/dev/video82']
-        
         with BimanualUmiEnv(
             output_dir=output,
             robots_config=robots_config,
@@ -80,8 +49,8 @@ def main(output, frequency, duration, test_move):
             frequency=frequency,
             obs_image_resolution=(224, 224),
             obs_float32=True,
-            camera_paths=camera_paths,  # Use explicit Pika camera paths
-            camera_reorder=None,  # Not needed with explicit paths
+            camera_config=camera_config,
+            camera_reorder=None,
             init_joints=False,
             enable_multi_cam_vis=True,
             # Observation horizons

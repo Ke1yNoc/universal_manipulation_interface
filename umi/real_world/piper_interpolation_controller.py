@@ -241,11 +241,6 @@ class PiperInterpolationController(mp.Process):
                 t_now = time.monotonic()
                 tcp_pose = pose_interp(t_now)
                 target_pose = tcp_pose.copy()
-                # 写入目标状态（用于观测/录制对齐）
-                self.ring_buffer.put({
-                    'TargetTCPPose': target_pose,
-                    'TargetQ': np.zeros(6, dtype=np.float64)
-                })
 
                 tcp_pos_m = target_pose[:3]
                 rotvec = target_pose[3:]
@@ -275,8 +270,11 @@ class PiperInterpolationController(mp.Process):
                 qd = (q - last_q) * self.frequency
                 last_q = q
                 t_recv = time.time()
-                # 写入实测状态与时间戳（对齐用）
+                
+                # 写入完整状态（目标+实测）到ring buffer，确保所有字段包括timestamp都在同一次put中
                 self.ring_buffer.put({
+                    'TargetTCPPose': target_pose,
+                    'TargetQ': np.zeros(6, dtype=np.float64),
                     'ActualTCPPose': state_tcp,
                     'ActualQ': q,
                     'ActualQd': qd,

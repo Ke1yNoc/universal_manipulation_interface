@@ -37,6 +37,7 @@ class BimanualUmiEnv:
             obs_image_resolution=(224,224),
             max_obs_buffer_size=60,
             obs_float32=False,
+            camera_config: Optional[dict] = None,
             camera_paths=None,  # Optional: explicit camera paths (e.g., ['/dev/video81', '/dev/video82'])
             camera_reorder=None,
             no_mirror=False,
@@ -83,7 +84,10 @@ class BimanualUmiEnv:
         time.sleep(0.1)
         
         # Use explicit camera paths if provided, otherwise auto-detect
-        if camera_paths is not None:
+        if camera_config is not None:
+            print(f"Configuring cameras from provided config: {camera_config}")
+            v4l_paths = camera_config['dev_video_paths']
+        elif camera_paths is not None:
             v4l_paths = camera_paths
         else:
             v4l_paths = get_sorted_v4l_paths()
@@ -107,8 +111,38 @@ class BimanualUmiEnv:
         video_recorder = list()
         transform = list()
         vis_transform = list()
-        for path in v4l_paths:
-            if 'Cam_Link_4K' in path:
+        
+        for i, path in enumerate(v4l_paths):
+            if camera_config is not None:
+                # Use config from yaml
+                res = tuple(camera_config['resolution'][i])
+                fps = camera_config['capture_fps'][i]
+                buf = 3 # Default buffer size
+                bit_rate = 3000*1000 # Default bitrate
+                
+                # Create transform function for this specific resolution
+                def tf(data, input_res=res):
+                    img = data['color']
+                    if fisheye_converter is None:
+                        f = get_image_transform(
+                            input_res=input_res,
+                            output_res=obs_image_resolution, 
+                            # obs output rgb
+                            bgr_to_rgb=True)
+                        img = np.ascontiguousarray(f(img))
+                        # No mirror handling for now with custom config unless needed
+                        img = draw_predefined_mask(img, color=(0,0,0), 
+                            mirror=no_mirror, gripper=True, finger=False, use_aa=True)
+                    else:
+                        img = fisheye_converter.forward(img)
+                        img = img[...,::-1]
+                    if obs_float32:
+                        img = img.astype(np.float32) / 255
+                    data['color'] = img
+                    return data
+                transform.append(tf)
+                
+            elif 'Cam_Link_4K' in path:
                 res = (3840, 2160)
                 fps = 30
                 buf = 3
@@ -393,10 +427,11 @@ class BimanualUmiEnv:
 
         # get data
         # 60 Hz, camera_calibrated_timestamp
+        # get data
+        # 60 Hz, camera_calibrated_timestamp
         k = math.ceil(
             self.camera_obs_horizon * self.camera_down_sample_steps \
             * (60 / self.frequency)) + 2 # here 2 is adjustable, typically 1 should be enough
-        # print('==>k  ', k, self.camera_obs_horizon, self.camera_down_sample_steps, self.frequency)
         self.last_camera_data = self.camera.get(
             k=k, 
             out=self.last_camera_data)
@@ -424,6 +459,10 @@ class BimanualUmiEnv:
                     continue
                 other_timestep_idx = -1
                 while True:
+                    # Safety check to prevent infinite loop
+                    if abs(other_timestep_idx) > len(self.last_camera_data[other_camera_idx]['timestamp']):
+                        break
+
                     if self.last_camera_data[other_camera_idx]['timestamp'][other_timestep_idx] < this_timestamp:
                         this_error += this_timestamp - self.last_camera_data[other_camera_idx]['timestamp'][other_timestep_idx]
                         break
@@ -460,9 +499,12 @@ class BimanualUmiEnv:
         robot_obs_timestamps = last_timestamp - (
             np.arange(self.robot_obs_horizon)[::-1] * self.robot_down_sample_steps * dt)
         for robot_idx, last_robot_data in enumerate(last_robots_data):
+            ts = last_robot_data['robot_timestamp']
+            pose = last_robot_data['ActualTCPPose']
+
             robot_pose_interpolator = PoseInterpolator(
-                t=last_robot_data['robot_timestamp'], 
-                x=last_robot_data['ActualTCPPose'])
+                t=ts, 
+                x=pose)
             robot_pose = robot_pose_interpolator(robot_obs_timestamps)
             robot_obs = {
                 f'robot{robot_idx}_eef_pos': robot_pose[...,:3],
