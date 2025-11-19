@@ -12,7 +12,7 @@ from umi.real_world.bimanual_umi_env import BimanualUmiEnv
 
 @click.command()
 @click.option('--output', '-o', default='data_local/test_bimanual_env', help='Output directory for test data')
-@click.option('--frequency', '-f', default=10, type=float, help='Control frequency in Hz')
+@click.option('--frequency', '-f', default=30, type=float, help='Control frequency in Hz')
 @click.option('--duration', '-d', default=5.0, type=float, help='Test duration in seconds')
 @click.option('--test_move', is_flag=True, default=False, help='Test robot movement')
 def main(output, frequency, duration, test_move):
@@ -147,42 +147,69 @@ def main(output, frequency, duration, test_move):
                 print("  ✓ Gripper test complete")
                 
                 # Test small robot movement
-                print("  Testing robot movement: Small Z-axis motion")
-                for i, initial_pose in enumerate(initial_poses):
-                    # Move up 5cm
-                    target_pose_up = initial_pose.copy()
-                    target_pose_up[2] += 0.05
+                # Test robot movement
+                print("  Testing robot movement: Simultaneous X, Y, Z, Rotation")
+                
+                # Define relative moves
+                moves = [
+                    ("X-axis +2cm", np.array([0.02, 0, 0, 0, 0, 0])),
+                    ("Y-axis +2cm", np.array([0, 0.02, 0, 0, 0, 0])),
+                    ("Z-axis +2cm", np.array([0, 0, 0.02, 0, 0, 0])),
+                    ("Rotation Z +15deg", np.array([0, 0, 0, 0, 0, np.deg2rad(15)]))
+                ]
+
+                import scipy.spatial.transform as st
+                
+                current_poses = [p.copy() for p in initial_poses]
+                
+                for move_name, delta in moves:
+                    print(f"    Executing: {move_name}")
                     
-                    action_up = np.zeros(14)
-                    action_up[i*7:i*7+6] = target_pose_up
-                    action_up[i*7+6] = 0.08  # Open gripper
-                    # Keep other robot at initial pose
-                    other_i = 1 - i
-                    action_up[other_i*7:other_i*7+6] = initial_poses[other_i]
-                    action_up[other_i*7+6] = 0.08
-                    
+                    # Calculate target poses for both robots
+                    target_action = np.zeros(14)
+                    for i in range(2):
+                        # Apply position delta
+                        current_poses[i][:3] += delta[:3]
+                        
+                        # Apply rotation delta (if any)
+                        if np.any(delta[3:]):
+                            # Convert current rotation vector to matrix
+                            curr_rot = st.Rotation.from_rotvec(current_poses[i][3:])
+                            # Create delta rotation
+                            delta_rot = st.Rotation.from_euler('xyz', delta[3:])
+                            # Apply delta (post-multiply for local frame, pre-multiply for global)
+                            # Here we assume global frame for simplicity or local depending on requirement.
+                            # Let's do global frame addition for position, and local for rotation? 
+                            # Actually, for simple testing, let's just add to rotvec if small, 
+                            # but correct way is matrix multiplication.
+                            new_rot = delta_rot * curr_rot
+                            current_poses[i][3:] = new_rot.as_rotvec()
+                        
+                        target_action[i*7:i*7+6] = current_poses[i]
+                        target_action[i*7+6] = 0.08 # Keep gripper open
+
                     env.exec_actions(
-                        actions=[action_up],
-                        timestamps=[time.time() + 0.5],
+                        actions=[target_action],
+                        timestamps=[time.time() + 1.0],
                         compensate_latency=False
                     )
                     time.sleep(2.0)
-                    
-                    # Move back down
-                    action_down = np.zeros(14)
-                    action_down[i*7:i*7+6] = initial_pose
-                    action_down[i*7+6] = 0.08
-                    action_down[other_i*7:other_i*7+6] = initial_poses[other_i]
-                    action_down[other_i*7+6] = 0.08
-                    
-                    env.exec_actions(
-                        actions=[action_down],
-                        timestamps=[time.time() + 0.5],
-                        compensate_latency=False
-                    )
-                    time.sleep(2.0)
-                    
-                    print(f"  ✓ Robot {i} movement test complete")
+
+                # Return to initial pose
+                print("    Returning to initial pose")
+                action_home = np.zeros(14)
+                for i in range(2):
+                    action_home[i*7:i*7+6] = initial_poses[i]
+                    action_home[i*7+6] = 0.08
+                
+                env.exec_actions(
+                    actions=[action_home],
+                    timestamps=[time.time() + 1.0],
+                    compensate_latency=False
+                )
+                time.sleep(2.0)
+                
+                print("  ✓ Robot movement test complete")
             
             # Monitor for duration
             print(f"\n✓ Monitoring for {duration} seconds...")

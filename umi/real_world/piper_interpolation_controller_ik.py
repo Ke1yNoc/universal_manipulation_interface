@@ -11,6 +11,7 @@ from umi.shared_memory.shared_memory_queue import (
 from umi.shared_memory.shared_memory_ring_buffer import SharedMemoryRingBuffer
 from umi.common.pose_trajectory_interpolator import PoseTrajectoryInterpolator
 from diffusion_policy.common.precise_sleep import precise_wait
+from umi.real_world.piper_ik_solver import PiperIKSolver, create_transformation_matrix
 
 
 class Command(enum.Enum):
@@ -69,11 +70,11 @@ def _apply_tool_offset_tcp_to_j6_rotvec(pos_mm_1000, rotvec_rad, tool_offset_m):
     )
 
 
-class PiperInterpolationController(mp.Process):
+class PiperInterpolationControllerIK(mp.Process):
     def __init__(self,
             shm_manager: SharedMemoryManager,
             piper_can,
-            frequency=200,
+            frequency=150,
             lookahead_time=0.1,
             gain_pos=0.25,
             gain_rot=0.16,
@@ -90,7 +91,7 @@ class PiperInterpolationController(mp.Process):
         # go_zero_on_start: 启动后是否回零位
         if get_max_k is None:
             get_max_k = int(frequency * 5)
-        super().__init__(name="PiperPositionalController")
+        super().__init__(name="PiperPositionalControllerIK")
         self.piper_can = piper_can
         self.frequency = frequency
         self.lookahead_time = lookahead_time
@@ -135,6 +136,10 @@ class PiperInterpolationController(mp.Process):
         self.ready_event = mp.Event()
         self.input_queue = input_queue
         self.ring_buffer = ring_buffer
+        
+        # Initialize IK solver (will be created in subprocess)
+        self.ik_solver = None
+        self.last_joint_angles = None
 
     def start(self, wait=True):
         super().start()
@@ -237,18 +242,54 @@ class PiperInterpolationController(mp.Process):
         last_q = np.zeros(6, dtype=np.float64)
         last_tcp = curr_pose.copy()
         try:
+            # Initialize IK solver in subprocess
+            if self.ik_solver is None:
+                self.ik_solver = PiperIKSolver(
+                    tool_offset=self.tool_offset[2],  # Use Z offset
+                    verbose=self.verbose
+                )
+                if self.verbose:
+                    print(f"[PiperIKController] IK solver initialized")
+            
             while True:
                 t_now = time.monotonic()
                 tcp_pose = pose_interp(t_now)
                 target_pose = tcp_pose.copy()
 
+                # Convert target pose to 4x4 matrix
                 tcp_pos_m = target_pose[:3]
                 rotvec = target_pose[3:]
-                euler_thousand = _rotvec_to_piper_euler_thousand_deg(rotvec)
-                pos_mm_1000 = np.round(tcp_pos_m * 1_000_000.0).astype(np.int64)
-                j6_xyz = _apply_tool_offset_tcp_to_j6_rotvec(pos_mm_1000, rotvec, self.tool_offset)
-                RX, RY, RZ = int(euler_thousand[0]), int(euler_thousand[1]), int(euler_thousand[2])
-                robot.EndPoseCtrl(int(j6_xyz[0]), int(j6_xyz[1]), int(j6_xyz[2]), RX, RY, RZ)
+                rot_matrix = st.Rotation.from_rotvec(rotvec).as_matrix()
+                
+                target_matrix = np.eye(4)
+                target_matrix[:3, :3] = rot_matrix
+                target_matrix[:3, 3] = tcp_pos_m
+                
+                # Solve IK
+                joint_angles, ik_success = self.ik_solver.solve_ik(
+                    target_matrix,
+                    initial_q=self.last_joint_angles
+                )
+                
+                if ik_success and joint_angles is not None:
+                    # Convert to Piper units (milliradians)
+                    joint_millirad = np.round(joint_angles * 57295.7795).astype(np.int64)
+                    
+                    # Send joint command
+                    robot.JointCtrl(
+                        int(joint_millirad[0]),
+                        int(joint_millirad[1]),
+                        int(joint_millirad[2]),
+                        int(joint_millirad[3]),
+                        int(joint_millirad[4]),
+                        int(joint_millirad[5])
+                    )
+                    
+                    self.last_joint_angles = joint_angles
+                else:
+                    if self.verbose:
+                        print(f"[PiperIKController] IK failed, skipping command")
+                    # Keep last valid command
 
                 # 读取末端姿态；零帧回退至上一帧，避免间歇性 0 值
                 state_end = robot.GetArmEndPoseMsgs().end_pose
