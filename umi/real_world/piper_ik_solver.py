@@ -124,7 +124,7 @@ class PiperIKSolver:
         search_paths = [
             Path(__file__).parent.parent.parent / "PikaAnyArm/piper/piper_description/urdf/piper_description.urdf",
             Path.home() / "universal_manipulation_interface/PikaAnyArm/piper/piper_description/urdf/piper_description.urdf",
-            Path("/opt/ros/noetic/share/piper_description/urdf/piper_description.urdf"),
+            Path("/home/neepok1/piper_ros/src/piper_description/urdf/piper_description.urdf"),
         ]
         
         for path in search_paths:
